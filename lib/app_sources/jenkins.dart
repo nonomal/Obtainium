@@ -6,8 +6,9 @@ import 'package:obtainium/providers/source_provider.dart';
 
 class Jenkins extends AppSource {
   Jenkins() {
-    overrideVersionDetectionFormDefault('releaseDateAsVersion',
-        disableStandard: true);
+    versionDetectionDisallowed = true;
+    neverAutoSelect = true;
+    showReleaseDateAsVersionToggle = true;
   }
 
   String trimJobUrl(String url) {
@@ -29,8 +30,8 @@ class Jenkins extends AppSource {
     Map<String, dynamic> additionalSettings,
   ) async {
     standardUrl = trimJobUrl(standardUrl);
-    Response res =
-        await sourceRequest('$standardUrl/lastSuccessfulBuild/api/json');
+    Response res = await sourceRequest(
+        '$standardUrl/lastSuccessfulBuild/api/json', additionalSettings);
     if (res.statusCode == 200) {
       var json = jsonDecode(res.body);
       var releaseDate = json['timestamp'] == null
