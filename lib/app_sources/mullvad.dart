@@ -10,10 +10,11 @@ class Mullvad extends AppSource {
   }
 
   @override
-  String sourceSpecificStandardizeURL(String url) {
-    RegExp standardUrlRegEx =
-        RegExp('^https?://(www\\.)?${getSourceRegex(hosts)}');
-    RegExpMatch? match = standardUrlRegEx.firstMatch(url.toLowerCase());
+  String sourceSpecificStandardizeURL(String url, {bool forSelection = false}) {
+    RegExp standardUrlRegEx = RegExp(
+        '^https?://(www\\.)?${getSourceRegex(hosts)}',
+        caseSensitive: false);
+    RegExpMatch? match = standardUrlRegEx.firstMatch(url);
     if (match == null) {
       throw InvalidURLError(name);
     }
@@ -29,7 +30,8 @@ class Mullvad extends AppSource {
     String standardUrl,
     Map<String, dynamic> additionalSettings,
   ) async {
-    Response res = await sourceRequest('$standardUrl/en/download/android');
+    Response res = await sourceRequest(
+        '$standardUrl/en/download/android', additionalSettings);
     if (res.statusCode == 200) {
       var versions = parse(res.body)
           .querySelectorAll('p')

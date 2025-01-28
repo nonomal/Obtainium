@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -22,6 +24,95 @@ class AppsPage extends StatefulWidget {
 
   @override
   State<AppsPage> createState() => AppsPageState();
+}
+
+showChangeLogDialog(BuildContext context, App app, String? changesUrl,
+    AppSource appSource, String changeLog) {
+  showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return GeneratedFormModal(
+          title: tr('changes'),
+          items: const [],
+          message: app.latestVersion,
+          additionalWidgets: [
+            changesUrl != null
+                ? GestureDetector(
+                    child: Text(
+                      changesUrl,
+                      style: const TextStyle(
+                          decoration: TextDecoration.underline,
+                          fontStyle: FontStyle.italic),
+                    ),
+                    onTap: () {
+                      launchUrlString(changesUrl,
+                          mode: LaunchMode.externalApplication);
+                    },
+                  )
+                : const SizedBox.shrink(),
+            changesUrl != null
+                ? const SizedBox(
+                    height: 16,
+                  )
+                : const SizedBox.shrink(),
+            appSource.changeLogIfAnyIsMarkDown
+                ? SizedBox(
+                    width: MediaQuery.of(context).size.width,
+                    height: MediaQuery.of(context).size.height - 350,
+                    child: Markdown(
+                      styleSheet: MarkdownStyleSheet(
+                          blockquoteDecoration: BoxDecoration(
+                              color: Theme.of(context).cardColor)),
+                      data: changeLog,
+                      onTapLink: (text, href, title) {
+                        if (href != null) {
+                          launchUrlString(
+                              href.startsWith('http://') ||
+                                      href.startsWith('https://')
+                                  ? href
+                                  : '${Uri.parse(app.url).origin}/$href',
+                              mode: LaunchMode.externalApplication);
+                        }
+                      },
+                      extensionSet: md.ExtensionSet(
+                        md.ExtensionSet.gitHubFlavored.blockSyntaxes,
+                        [
+                          md.EmojiSyntax(),
+                          ...md.ExtensionSet.gitHubFlavored.inlineSyntaxes
+                        ],
+                      ),
+                    ))
+                : Text(changeLog),
+          ],
+          singleNullReturnButton: tr('ok'),
+        );
+      });
+}
+
+getChangeLogFn(BuildContext context, App app) {
+  AppSource appSource =
+      SourceProvider().getSource(app.url, overrideSource: app.overrideSource);
+  String? changesUrl = appSource.changeLogPageFromStandardUrl(app.url);
+  String? changeLog = app.changeLog;
+  if (changeLog?.split('\n').length == 1) {
+    if (RegExp(
+            '(http|ftp|https)://([\\w_-]+(?:(?:\\.[\\w_-]+)+))([\\w.,@?^=%&:/~+#-]*[\\w@?^=%&/~+#-])?')
+        .hasMatch(changeLog!)) {
+      if (changesUrl == null) {
+        changesUrl = changeLog;
+        changeLog = null;
+      }
+    }
+  }
+  return (changeLog == null && changesUrl == null)
+      ? null
+      : () {
+          if (changeLog != null) {
+            showChangeLogDialog(context, app, changesUrl, appSource, changeLog);
+          } else {
+            launchUrlString(changesUrl!, mode: LaunchMode.externalApplication);
+          }
+        };
 }
 
 class AppsPageState extends State<AppsPage> {
@@ -55,11 +146,14 @@ class AppsPageState extends State<AppsPage> {
   final GlobalKey<RefreshIndicatorState> _refreshIndicatorKey =
       GlobalKey<RefreshIndicatorState>();
 
+  late final ScrollController scrollController = ScrollController();
+
+  var sourceProvider = SourceProvider();
+
   @override
   Widget build(BuildContext context) {
     var appsProvider = context.watch<AppsProvider>();
     var settingsProvider = context.watch<SettingsProvider>();
-    var sourceProvider = SourceProvider();
     var listedApps = appsProvider.getAppValues().toList();
 
     refresh() {
@@ -260,73 +354,17 @@ class AppsPageState extends State<AppsPage> {
         .where((a) => selectedAppIds.contains(a.id))
         .toSet();
 
-    showChangeLogDialog(
-        String? changesUrl, AppSource appSource, String changeLog, int index) {
-      showDialog(
-          context: context,
-          builder: (BuildContext context) {
-            return GeneratedFormModal(
-              title: tr('changes'),
-              items: const [],
-              message: listedApps[index].app.latestVersion,
-              additionalWidgets: [
-                changesUrl != null
-                    ? GestureDetector(
-                        child: Text(
-                          changesUrl,
-                          style: const TextStyle(
-                              decoration: TextDecoration.underline,
-                              fontStyle: FontStyle.italic),
-                        ),
-                        onTap: () {
-                          launchUrlString(changesUrl,
-                              mode: LaunchMode.externalApplication);
-                        },
-                      )
-                    : const SizedBox.shrink(),
-                changesUrl != null
-                    ? const SizedBox(
-                        height: 16,
-                      )
-                    : const SizedBox.shrink(),
-                appSource.changeLogIfAnyIsMarkDown
-                    ? SizedBox(
-                        width: MediaQuery.of(context).size.width,
-                        height: MediaQuery.of(context).size.height - 350,
-                        child: Markdown(
-                          data: changeLog,
-                          onTapLink: (text, href, title) {
-                            if (href != null) {
-                              launchUrlString(
-                                  href.startsWith('http://') ||
-                                          href.startsWith('https://')
-                                      ? href
-                                      : '${Uri.parse(listedApps[index].app.url).origin}/$href',
-                                  mode: LaunchMode.externalApplication);
-                            }
-                          },
-                          extensionSet: md.ExtensionSet(
-                            md.ExtensionSet.gitHubFlavored.blockSyntaxes,
-                            [
-                              md.EmojiSyntax(),
-                              ...md.ExtensionSet.gitHubFlavored.inlineSyntaxes
-                            ],
-                          ),
-                        ))
-                    : Text(changeLog),
-              ],
-              singleNullReturnButton: tr('ok'),
-            );
-          });
-    }
-
     getLoadingWidgets() {
       return [
         if (listedApps.isEmpty)
           SliverFillRemaining(
               child: Center(
                   child: Text(
-            appsProvider.apps.isEmpty ? tr('noApps') : tr('noAppsForFilter'),
+            appsProvider.apps.isEmpty
+                ? appsProvider.loadingApps
+                    ? tr('pleaseWait')
+                    : tr('noApps')
+                : tr('noAppsForFilter'),
             style: Theme.of(context).textTheme.headlineMedium,
             textAlign: TextAlign.center,
           ))),
@@ -347,25 +385,6 @@ class AppsPageState extends State<AppsPage> {
             ),
           )
       ];
-    }
-
-    getChangeLogFn(int appIndex) {
-      AppSource appSource = SourceProvider().getSource(
-          listedApps[appIndex].app.url,
-          overrideSource: listedApps[appIndex].app.overrideSource);
-      String? changesUrl =
-          appSource.changeLogPageFromStandardUrl(listedApps[appIndex].app.url);
-      String? changeLog = listedApps[appIndex].app.changeLog;
-      return (changeLog == null && changesUrl == null)
-          ? null
-          : () {
-              if (changeLog != null) {
-                showChangeLogDialog(changesUrl, appSource, changeLog, appIndex);
-              } else {
-                launchUrlString(changesUrl!,
-                    mode: LaunchMode.externalApplication);
-              }
-            };
     }
 
     getUpdateButton(int appIndex) {
@@ -393,33 +412,42 @@ class AppsPageState extends State<AppsPage> {
     }
 
     getAppIcon(int appIndex) {
-      return listedApps[appIndex].icon != null
-          ? Image.memory(
-              listedApps[appIndex].icon!,
-              gaplessPlayback: true,
-            )
-          : Row(
-              mainAxisSize: MainAxisSize.min,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                  Transform(
-                      alignment: Alignment.center,
-                      transform: Matrix4.rotationZ(0.31),
-                      child: Padding(
-                        padding: const EdgeInsets.all(15),
-                        child: Image(
-                          image: const AssetImage(
-                              'assets/graphics/icon_small.png'),
-                          color: Colors.white.withOpacity(0.3),
-                          colorBlendMode: BlendMode.modulate,
-                          gaplessPlayback: true,
-                        ),
-                      )),
-                ]);
+      return FutureBuilder(
+          future: appsProvider.updateAppIcon(listedApps[appIndex].app.id),
+          builder: (ctx, val) {
+            return listedApps[appIndex].icon != null
+                ? Image.memory(
+                    listedApps[appIndex].icon!,
+                    gaplessPlayback: true,
+                    opacity: AlwaysStoppedAnimation(
+                        listedApps[appIndex].installedInfo == null ? 0.6 : 1),
+                  )
+                : Row(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                        Transform(
+                            alignment: Alignment.center,
+                            transform: Matrix4.rotationZ(0.31),
+                            child: Padding(
+                              padding: const EdgeInsets.all(15),
+                              child: Image(
+                                image: const AssetImage(
+                                    'assets/graphics/icon_small.png'),
+                                color: Theme.of(context).brightness ==
+                                        Brightness.dark
+                                    ? Colors.white.withOpacity(0.4)
+                                    : Colors.white.withOpacity(0.3),
+                                colorBlendMode: BlendMode.modulate,
+                                gaplessPlayback: true,
+                              ),
+                            )),
+                      ]);
+          });
     }
 
     getVersionText(int appIndex) {
-      return '${listedApps[appIndex].app.installedVersion ?? tr('notInstalled')}${listedApps[appIndex].app.additionalSettings['trackOnly'] == true ? ' ${tr('estimateInBrackets')}' : ''}';
+      return '${listedApps[appIndex].app.installedVersion ?? tr('notInstalled')}${listedApps[appIndex].app.additionalSettings['trackOnly'] == true ? ' ${tr('pseudoVersion')}' : ''}';
     }
 
     getChangesButtonString(int appIndex, bool hasChangeLogFn) {
@@ -428,11 +456,11 @@ class AppsPageState extends State<AppsPage> {
               ? tr('changes')
               : ''
           : DateFormat('yyyy-MM-dd')
-              .format(listedApps[appIndex].app.releaseDate!);
+              .format(listedApps[appIndex].app.releaseDate!.toLocal());
     }
 
     getSingleAppHorizTile(int index) {
-      var showChangesFn = getChangeLogFn(index);
+      var showChangesFn = getChangeLogFn(context, listedApps[index].app);
       var hasUpdate = listedApps[index].app.installedVersion != null &&
           listedApps[index].app.installedVersion !=
               listedApps[index].app.latestVersion;
@@ -443,7 +471,7 @@ class AppsPageState extends State<AppsPage> {
           hasUpdate ? getUpdateButton(index) : const SizedBox.shrink(),
           hasUpdate
               ? const SizedBox(
-                  width: 10,
+                  width: 5,
                 )
               : const SizedBox.shrink(),
           GestureDetector(
@@ -456,7 +484,10 @@ class AppsPageState extends State<AppsPage> {
                           ? (Theme.of(context).brightness == Brightness.light
                                   ? Theme.of(context).primaryColor
                                   : Theme.of(context).primaryColorLight)
-                              .withAlpha(20)
+                              .withAlpha(Theme.of(context).brightness ==
+                                      Brightness.light
+                                  ? 20
+                                  : 40)
                           : null),
                   padding: settingsProvider.highlightTouchTargets
                       ? const EdgeInsetsDirectional.fromSTEB(12, 0, 12, 0)
@@ -494,14 +525,14 @@ class AppsPageState extends State<AppsPage> {
       );
 
       var transparent =
-          Theme.of(context).colorScheme.background.withAlpha(0).value;
+          Theme.of(context).colorScheme.surface.withAlpha(0).value;
       List<double> stops = [
-        ...listedApps[index].app.categories.asMap().entries.map(
-            (e) => ((e.key / (listedApps[index].app.categories.length - 1)))),
+        ...listedApps[index].app.categories.asMap().entries.map((e) =>
+            ((e.key / (listedApps[index].app.categories.length - 1)) - 0.0001)),
         1
       ];
       if (stops.length == 2) {
-        stops[0] = 1;
+        stops[0] = 0.9999;
       }
       return Container(
           decoration: BoxDecoration(
@@ -694,7 +725,7 @@ class AppsPageState extends State<AppsPage> {
                     showError(e, context);
                     return <String>[];
                   }).then((value) {
-                    if (shouldInstallUpdates) {
+                    if (value.isNotEmpty && shouldInstallUpdates) {
                       showMessage(tr('appsUpdated'), context);
                     }
                   });
@@ -813,30 +844,6 @@ class AppsPageState extends State<AppsPage> {
       Navigator.of(context).pop();
     }
 
-    resetSelectedAppsInstallStatuses() async {
-      try {
-        var values = await showDialog(
-            context: context,
-            builder: (BuildContext ctx) {
-              return GeneratedFormModal(
-                title: tr('resetInstallStatusForSelectedAppsQuestion'),
-                items: const [],
-                initValid: true,
-                message: tr('installStatusOfXWillBeResetExplanation',
-                    args: [plural('apps', selectedAppIds.length)]),
-              );
-            });
-        if (values != null) {
-          appsProvider.saveApps(selectedApps.map((e) {
-            e.installedVersion = null;
-            return e;
-          }).toList());
-        }
-      } finally {
-        Navigator.of(context).pop();
-      }
-    }
-
     showMoreOptionsDialog() {
       return showDialog(
           context: context,
@@ -845,47 +852,97 @@ class AppsPageState extends State<AppsPage> {
               scrollable: true,
               content: Padding(
                 padding: const EdgeInsets.only(top: 6),
-                child: Row(
+                child: Column(
                     mainAxisAlignment: MainAxisAlignment.spaceAround,
                     children: [
-                      IconButton(
+                      TextButton(
+                          onPressed: pinSelectedApps,
+                          child: Text(selectedApps
+                                  .where((element) => element.pinned)
+                                  .isEmpty
+                              ? tr('pinToTop')
+                              : tr('unpinFromTop'))),
+                      const Divider(),
+                      TextButton(
+                          onPressed: () {
+                            String urls = '';
+                            for (var a in selectedApps) {
+                              urls += '${a.url}\n';
+                            }
+                            urls = urls.substring(0, urls.length - 1);
+                            Share.share(urls,
+                                subject: 'Obtainium - ${tr('appsString')}');
+                            Navigator.of(context).pop();
+                          },
+                          child: Text(tr('shareSelectedAppURLs'))),
+                      const Divider(),
+                      TextButton(
+                          onPressed: selectedAppIds.isEmpty
+                              ? null
+                              : () {
+                                  String urls = '';
+                                  for (var a in selectedApps) {
+                                    urls +=
+                                        'https://apps.obtainium.imranr.dev/redirect?r=obtainium://app/${Uri.encodeComponent(jsonEncode({
+                                          'id': a.id,
+                                          'url': a.url,
+                                          'author': a.author,
+                                          'name': a.name,
+                                          'preferredApkIndex':
+                                              a.preferredApkIndex,
+                                          'additionalSettings':
+                                              jsonEncode(a.additionalSettings),
+                                          'overrideSource': a.overrideSource
+                                        }))}\n\n';
+                                  }
+                                  Share.share(urls,
+                                      subject:
+                                          'Obtainium - ${tr('appsString')}');
+                                },
+                          child: Text(tr('shareAppConfigLinks'))),
+                      const Divider(),
+                      TextButton(
+                          onPressed: selectedAppIds.isEmpty
+                              ? null
+                              : () {
+                                  var exportJSON = jsonEncode(
+                                      appsProvider.generateExportJSON(
+                                          appIds: selectedApps
+                                              .map((e) => e.id)
+                                              .toList(),
+                                          overrideExportSettings: false));
+                                  XFile f = XFile.fromData(
+                                      Uint8List.fromList(
+                                          utf8.encode(exportJSON)),
+                                      mimeType: 'application/json',
+                                      name:
+                                          '${tr('obtainiumExportHyphenatedLowercase')}-${selectedApps.length}-${DateTime.now().millisecondsSinceEpoch}');
+                                  Share.shareXFiles([f]);
+                                },
+                          child: Text(
+                              '${tr('share')} - ${tr('obtainiumExport')}')),
+                      const Divider(),
+                      TextButton(
+                          onPressed: () {
+                            appsProvider
+                                .downloadAppAssets(
+                                    selectedApps.map((e) => e.id).toList(),
+                                    globalNavigatorKey.currentContext ??
+                                        context)
+                                .catchError((e) => showError(
+                                    e,
+                                    globalNavigatorKey.currentContext ??
+                                        context));
+                            Navigator.of(context).pop();
+                          },
+                          child: Text(tr('downloadX',
+                              args: [tr('releaseAsset').toLowerCase()]))),
+                      const Divider(),
+                      TextButton(
                           onPressed: appsProvider.areDownloadsRunning()
                               ? null
                               : showMassMarkDialog,
-                          tooltip: tr('markSelectedAppsUpdated'),
-                          icon: const Icon(Icons.done)),
-                      IconButton(
-                        onPressed: pinSelectedApps,
-                        tooltip: selectedApps
-                                .where((element) => element.pinned)
-                                .isEmpty
-                            ? tr('pinToTop')
-                            : tr('unpinFromTop'),
-                        icon: Icon(selectedApps
-                                .where((element) => element.pinned)
-                                .isEmpty
-                            ? Icons.bookmark_outline_rounded
-                            : Icons.bookmark_remove_outlined),
-                      ),
-                      IconButton(
-                        onPressed: () {
-                          String urls = '';
-                          for (var a in selectedApps) {
-                            urls += 'obtainium://add/${a.url}\n';
-                          }
-                          urls = urls.substring(0, urls.length - 1);
-                          Share.share(urls,
-                              subject: tr('selectedAppURLsFromObtainium'));
-                          Navigator.of(context).pop();
-                        },
-                        tooltip: tr('shareSelectedAppURLs'),
-                        icon: const Icon(Icons.share),
-                      ),
-                      IconButton(
-                        onPressed: resetSelectedAppsInstallStatuses,
-                        tooltip: tr('resetInstallStatus'),
-                        icon: const Icon(Icons.restore_page_outlined),
-                      ),
+                          child: Text(tr('markSelectedAppsUpdated'))),
                     ]),
               ),
             );
@@ -1004,7 +1061,9 @@ class AppsPageState extends State<AppsPage> {
           IconButton(
               color: Theme.of(context).colorScheme.primary,
               style: const ButtonStyle(visualDensity: VisualDensity.compact),
-              tooltip: isFilterOff ? tr('filter') : tr('filterActive'),
+              tooltip: isFilterOff
+                  ? tr('filterApps')
+                  : '${tr('filter')} - ${tr('remove')}',
               onPressed: isFilterOff
                   ? showFilterDialog
                   : () {
@@ -1013,8 +1072,8 @@ class AppsPageState extends State<AppsPage> {
                       });
                     },
               icon: Icon(isFilterOff
-                  ? Icons.filter_list_rounded
-                  : Icons.filter_list_off_rounded)),
+                  ? Icons.search_rounded
+                  : Icons.search_off_rounded)),
           const SizedBox(
             width: 10,
           ),
@@ -1049,11 +1108,17 @@ class AppsPageState extends State<AppsPage> {
       body: RefreshIndicator(
           key: _refreshIndicatorKey,
           onRefresh: refresh,
-          child: CustomScrollView(slivers: <Widget>[
-            CustomAppBar(title: tr('appsString')),
-            ...getLoadingWidgets(),
-            getDisplayedList()
-          ])),
+          child: Scrollbar(
+              interactive: true,
+              controller: scrollController,
+              child: CustomScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  controller: scrollController,
+                  slivers: <Widget>[
+                    CustomAppBar(title: tr('appsString')),
+                    ...getLoadingWidgets(),
+                    getDisplayedList()
+                  ]))),
       persistentFooterButtons: appsProvider.apps.isEmpty
           ? null
           : [
