@@ -33,7 +33,7 @@ class _ImportExportPageState extends State<ImportExportPage> {
     var settingsProvider = context.watch<SettingsProvider>();
 
     var outlineButtonStyle = ButtonStyle(
-      shape: MaterialStateProperty.all(
+      shape: WidgetStateProperty.all(
         StadiumBorder(
           side: BorderSide(
             width: 1,
@@ -144,7 +144,7 @@ class _ImportExportPageState extends State<ImportExportPage> {
             appsProvider.addMissingCategories(settingsProvider);
             showMessage(
                 '${tr('importedX', args: [
-                      plural('apps', value.key)
+                      plural('apps', value.key.length)
                     ])}${value.value ? ' + ${tr('settings')}' : ''}',
                 context);
           });
@@ -213,7 +213,7 @@ class _ImportExportPageState extends State<ImportExportPage> {
           setState(() {
             importInProgress = true;
           });
-          if (values['url'] != source.hosts[0]) {
+          if (source.hosts.isEmpty || values['url'] != source.hosts[0]) {
             source = sourceProvider.getSource(values['url'],
                 overrideSource: source.runtimeType.toString());
           }

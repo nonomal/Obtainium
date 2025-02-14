@@ -13,6 +13,7 @@ import 'package:obtainium/pages/import_export.dart';
 import 'package:obtainium/pages/settings.dart';
 import 'package:obtainium/providers/apps_provider.dart';
 import 'package:obtainium/providers/settings_provider.dart';
+import 'package:obtainium/providers/source_provider.dart';
 import 'package:provider/provider.dart';
 
 class HomePage extends StatefulWidget {
@@ -102,13 +103,22 @@ class _HomePageState extends State<HomePage> {
                   }) !=
               null) {
             // ignore: use_build_context_synchronously
-            var result = await context.read<AppsProvider>().import(
-                action == 'app'
-                    ? '{ "apps": [$dataStr] }'
-                    : '{ "apps": $dataStr }');
+            var appsProvider = context.read<AppsProvider>();
+            var result = await appsProvider.import(action == 'app'
+                ? '{ "apps": [$dataStr] }'
+                : '{ "apps": $dataStr }');
             // ignore: use_build_context_synchronously
             showMessage(
-                tr('importedX', args: [plural('apps', result.key)]), context);
+                tr('importedX', args: [plural('apps', result.key.length)]),
+                context);
+            await appsProvider
+                .checkUpdates(specificIds: result.key.map((e) => e.id).toList())
+                .catchError((e) {
+              if (e is Map && e['errors'] is MultiAppMultiError) {
+                showError(e['errors'].toString(), context);
+              }
+              return <App>[];
+            });
           }
         } else {
           throw ObtainiumError(tr('unknown'));
@@ -119,14 +129,19 @@ class _HomePageState extends State<HomePage> {
     }
 
     // Check initial link if app was in cold state (terminated)
-    final appLink = await _appLinks.getInitialAppLink();
+    final appLink = await _appLinks.getInitialLink();
+    var initLinked = false;
     if (appLink != null) {
       await interpretLink(appLink);
+      initLinked = true;
     }
-
     // Handle link when app is in warm state (front or background)
     _linkSubscription = _appLinks.uriLinkStream.listen((uri) async {
-      await interpretLink(uri);
+      if (!initLinked) {
+        await interpretLink(uri);
+      } else {
+        initLinked = false;
+      }
     });
   }
 

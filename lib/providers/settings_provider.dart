@@ -16,26 +16,14 @@ import 'package:shared_storage/shared_storage.dart' as saf;
 
 String obtainiumTempId = 'imranr98_obtainium_${GitHub().hosts[0]}';
 String obtainiumId = 'dev.imranr.obtainium';
-
-enum InstallMethodSettings { normal, shizuku, root }
+String obtainiumUrl = 'https://github.com/ImranR98/Obtainium';
+Color obtainiumThemeColor = const Color(0xFF6438B5);
 
 enum ThemeSettings { system, light, dark }
-
-enum ColourSettings { basic, materialYou }
 
 enum SortColumnSettings { added, nameAuthor, authorName, releaseDate }
 
 enum SortOrderSettings { ascending, descending }
-
-const maxAPIRateLimitMinutes = 30;
-const minUpdateIntervalMinutes = maxAPIRateLimitMinutes + 30;
-const maxUpdateIntervalMinutes = 4320;
-List<int> updateIntervals = [15, 30, 60, 120, 180, 360, 720, 1440, 4320, 0]
-    .where((element) =>
-        (element >= minUpdateIntervalMinutes &&
-            element <= maxUpdateIntervalMinutes) ||
-        element == 0)
-    .toList();
 
 class SettingsProvider with ChangeNotifier {
   SharedPreferences? prefs;
@@ -60,13 +48,12 @@ class SettingsProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  InstallMethodSettings get installMethod {
-    return InstallMethodSettings.values[
-        prefs?.getInt('installMethod') ?? InstallMethodSettings.normal.index];
+  bool get useShizuku {
+    return prefs?.getBool('useShizuku') ?? false;
   }
 
-  set installMethod(InstallMethodSettings t) {
-    prefs?.setInt('installMethod', t.index);
+  set useShizuku(bool useShizuku) {
+    prefs?.setBool('useShizuku', useShizuku);
     notifyListeners();
   }
 
@@ -80,13 +67,22 @@ class SettingsProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  ColourSettings get colour {
-    return ColourSettings
-        .values[prefs?.getInt('colour') ?? ColourSettings.basic.index];
+  Color get themeColor {
+    int? colorCode = prefs?.getInt('themeColor');
+    return (colorCode != null) ? Color(colorCode) : obtainiumThemeColor;
   }
 
-  set colour(ColourSettings t) {
-    prefs?.setInt('colour', t.index);
+  set themeColor(Color themeColor) {
+    prefs?.setInt('themeColor', themeColor.value);
+    notifyListeners();
+  }
+
+  bool get useMaterialYou {
+    return prefs?.getBool('useMaterialYou') ?? false;
+  }
+
+  set useMaterialYou(bool useMaterialYou) {
+    prefs?.setBool('useMaterialYou', useMaterialYou);
     notifyListeners();
   }
 
@@ -100,21 +96,20 @@ class SettingsProvider with ChangeNotifier {
   }
 
   int get updateInterval {
-    var min = prefs?.getInt('updateInterval') ?? 360;
-    if (!updateIntervals.contains(min)) {
-      var temp = updateIntervals[0];
-      for (var i in updateIntervals) {
-        if (min > i && i != 0) {
-          temp = i;
-        }
-      }
-      min = temp;
-    }
-    return min;
+    return prefs?.getInt('updateInterval') ?? 360;
   }
 
   set updateInterval(int min) {
-    prefs?.setInt('updateInterval', (min < 15 && min != 0) ? 15 : min);
+    prefs?.setInt('updateInterval', min);
+    notifyListeners();
+  }
+
+  double get updateIntervalSliderVal {
+    return prefs?.getDouble('updateIntervalSliderVal') ?? 6.0;
+  }
+
+  set updateIntervalSliderVal(double val) {
+    prefs?.setDouble('updateIntervalSliderVal', val);
     notifyListeners();
   }
 
@@ -354,6 +349,15 @@ class SettingsProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  bool get bgUpdatesWhileChargingOnly {
+    return prefs?.getBool('bgUpdatesWhileChargingOnly') ?? false;
+  }
+
+  set bgUpdatesWhileChargingOnly(bool val) {
+    prefs?.setBool('bgUpdatesWhileChargingOnly', val);
+    notifyListeners();
+  }
+
   DateTime get lastCompletedBGCheckTime {
     int? temp = prefs?.getInt('lastCompletedBGCheckTime');
     return temp != null
@@ -462,6 +466,24 @@ class SettingsProvider with ChangeNotifier {
 
   set searchDeselected(List<String> list) {
     prefs?.setStringList('searchDeselected', list);
+    notifyListeners();
+  }
+
+  bool get beforeNewInstallsShareToAppVerifier {
+    return prefs?.getBool('beforeNewInstallsShareToAppVerifier') ?? true;
+  }
+
+  set beforeNewInstallsShareToAppVerifier(bool val) {
+    prefs?.setBool('beforeNewInstallsShareToAppVerifier', val);
+    notifyListeners();
+  }
+
+  bool get shizukuPretendToBeGooglePlay {
+    return prefs?.getBool('shizukuPretendToBeGooglePlay') ?? false;
+  }
+
+  set shizukuPretendToBeGooglePlay(bool val) {
+    prefs?.setBool('shizukuPretendToBeGooglePlay', val);
     notifyListeners();
   }
 }
