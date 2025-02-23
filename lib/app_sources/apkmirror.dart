@@ -5,12 +5,15 @@ import 'package:html/parser.dart';
 import 'package:http/http.dart';
 import 'package:obtainium/components/generated_form.dart';
 import 'package:obtainium/custom_errors.dart';
+import 'package:obtainium/providers/apps_provider.dart';
+import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/providers/source_provider.dart';
 
 class APKMirror extends AppSource {
   APKMirror() {
     hosts = ['apkmirror.com'];
     enforceTrackOnly = true;
+    showReleaseDateAsVersionToggle = true;
 
     additionalSourceAppSpecificSettingFormItems = [
       [
@@ -31,10 +34,21 @@ class APKMirror extends AppSource {
   }
 
   @override
-  String sourceSpecificStandardizeURL(String url) {
-    RegExp standardUrlRegEx =
-        RegExp('^https?://(www\\.)?${getSourceRegex(hosts)}/apk/[^/]+/[^/]+');
-    RegExpMatch? match = standardUrlRegEx.firstMatch(url.toLowerCase());
+  Future<Map<String, String>?> getRequestHeaders(
+      Map<String, dynamic> additionalSettings,
+      {bool forAPKDownload = false}) async {
+    return {
+      "User-Agent":
+          "Obtainium/${(await getInstalledInfo(obtainiumId))?.versionName ?? '1.0.0'}"
+    };
+  }
+
+  @override
+  String sourceSpecificStandardizeURL(String url, {bool forSelection = false}) {
+    RegExp standardUrlRegEx = RegExp(
+        '^https?://(www\\.)?${getSourceRegex(hosts)}/apk/[^/]+/[^/]+',
+        caseSensitive: false);
+    RegExpMatch? match = standardUrlRegEx.firstMatch(url);
     if (match == null) {
       throw InvalidURLError(name);
     }
@@ -58,7 +72,7 @@ class APKMirror extends AppSource {
                 true
             ? additionalSettings['filterReleaseTitlesByRegEx']
             : null;
-    Response res = await sourceRequest('$standardUrl/feed');
+    Response res = await sourceRequest('$standardUrl/feed', additionalSettings);
     if (res.statusCode == 200) {
       var items = parse(res.body).querySelectorAll('item');
       dynamic targetRelease;

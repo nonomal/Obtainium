@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:obtainium/pages/home.dart';
 import 'package:obtainium/providers/apps_provider.dart';
 import 'package:obtainium/providers/logs_provider.dart';
+import 'package:obtainium/providers/native_provider.dart';
 import 'package:obtainium/providers/notifications_provider.dart';
 import 'package:obtainium/providers/settings_provider.dart';
 import 'package:obtainium/providers/source_provider.dart';
@@ -19,15 +20,10 @@ import 'package:easy_localization/src/easy_localization_controller.dart';
 // ignore: implementation_imports
 import 'package:easy_localization/src/localization.dart';
 
-const String currentVersion = '0.15.8';
-const String currentReleaseTag =
-    'v$currentVersion-beta'; // KEEP THIS IN SYNC WITH GITHUB RELEASES
-
-const int bgUpdateCheckAlarmId = 666;
-
 List<MapEntry<Locale, String>> supportedLocales = const [
   MapEntry(Locale('en'), 'English'),
   MapEntry(Locale('zh'), '简体中文'),
+  MapEntry(Locale('zh', 'Hant_TW'), '臺灣話'),
   MapEntry(Locale('it'), 'Italiano'),
   MapEntry(Locale('ja'), '日本語'),
   MapEntry(Locale('hu'), 'Magyar'),
@@ -44,6 +40,12 @@ List<MapEntry<Locale, String>> supportedLocales = const [
   MapEntry(Locale('nl'), 'Nederlands'),
   MapEntry(Locale('vi'), 'Tiếng Việt'),
   MapEntry(Locale('tr'), 'Türkçe'),
+  MapEntry(Locale('uk'), 'Українська'),
+  MapEntry(Locale('da'), 'Dansk'),
+  MapEntry(Locale('en', 'EO'),
+      'Esperanto'), // https://github.com/aissat/easy_localization/issues/220#issuecomment-846035493
+  MapEntry(Locale('in'), 'Bahasa Indonesia'),
+  MapEntry(Locale('ko'), '한국어'),
 ];
 const fallbackLocale = Locale('en');
 const localeDir = 'assets/translations';
@@ -59,11 +61,11 @@ Future<void> loadTranslations() async {
   var forceLocale = s.forcedLocale;
   final controller = EasyLocalizationController(
     saveLocale: true,
-    forceLocale: forceLocale != null ? Locale(forceLocale) : null,
+    forceLocale: forceLocale,
     fallbackLocale: fallbackLocale,
     supportedLocales: supportedLocales.map((e) => e.key).toList(),
     assetLoader: const RootBundleAssetLoader(),
-    useOnlyLangCode: true,
+    useOnlyLangCode: false,
     useFallbackTranslations: true,
     path: localeDir,
     onLoadError: (FlutterError e) {
@@ -117,13 +119,11 @@ void main() async {
         supportedLocales: supportedLocales.map((e) => e.key).toList(),
         path: localeDir,
         fallbackLocale: fallbackLocale,
-        useOnlyLangCode: true,
+        useOnlyLangCode: false,
         child: const Obtainium()),
   ));
   BackgroundFetch.registerHeadlessTask(backgroundFetchHeadlessTask);
 }
-
-var defaultThemeColour = Colors.deepPurple;
 
 class Obtainium extends StatefulWidget {
   const Obtainium({super.key});
@@ -146,6 +146,7 @@ class _ObtainiumState extends State<Obtainium> {
         BackgroundFetchConfig(
             minimumFetchInterval: 15,
             stopOnTerminate: false,
+            startOnBoot: true,
             enableHeadless: true,
             requiresBatteryNotLow: false,
             requiresCharging: false,
@@ -176,28 +177,35 @@ class _ObtainiumState extends State<Obtainium> {
         // If this is the first run, ask for notification permissions and add Obtainium to the Apps list
         Permission.notification.request();
         if (!fdroid) {
-          appsProvider.saveApps([
-            App(
-                obtainiumId,
-                'https://github.com/ImranR98/Obtainium',
-                'ImranR98',
-                'Obtainium',
-                currentReleaseTag,
-                currentReleaseTag,
-                [],
-                0,
-                {'includePrereleases': true},
-                null,
-                false)
-          ], onlyIfExists: false);
+          getInstalledInfo(obtainiumId).then((value) {
+            if (value?.versionName != null) {
+              appsProvider.saveApps([
+                App(
+                    obtainiumId,
+                    obtainiumUrl,
+                    'ImranR98',
+                    'Obtainium',
+                    value!.versionName,
+                    value.versionName!,
+                    [],
+                    0,
+                    {
+                      'versionDetection': true,
+                      'apkFilterRegEx': 'fdroid',
+                      'invertAPKFilter': true
+                    },
+                    null,
+                    false)
+              ], onlyIfExists: false);
+            }
+          }).catchError((err) {
+            print(err);
+          });
         }
       }
-      if (!supportedLocales
-              .map((e) => e.key.languageCode)
-              .contains(context.locale.languageCode) ||
+      if (!supportedLocales.map((e) => e.key).contains(context.locale) ||
           (settingsProvider.forcedLocale == null &&
-              context.deviceLocale.languageCode !=
-                  context.locale.languageCode)) {
+              context.deviceLocale != context.locale)) {
         settingsProvider.resetLocaleSafe(context);
       }
     }
@@ -209,21 +217,24 @@ class _ObtainiumState extends State<Obtainium> {
       ColorScheme darkColorScheme;
       if (lightDynamic != null &&
           darkDynamic != null &&
-          settingsProvider.colour == ColourSettings.materialYou) {
+          settingsProvider.useMaterialYou) {
         lightColorScheme = lightDynamic.harmonized();
         darkColorScheme = darkDynamic.harmonized();
       } else {
-        lightColorScheme = ColorScheme.fromSeed(seedColor: defaultThemeColour);
+        lightColorScheme =
+            ColorScheme.fromSeed(seedColor: settingsProvider.themeColor);
         darkColorScheme = ColorScheme.fromSeed(
-            seedColor: defaultThemeColour, brightness: Brightness.dark);
+            seedColor: settingsProvider.themeColor,
+            brightness: Brightness.dark);
       }
 
       // set the background and surface colors to pure black in the amoled theme
       if (settingsProvider.useBlackTheme) {
-        darkColorScheme = darkColorScheme
-            .copyWith(background: Colors.black, surface: Colors.black)
-            .harmonized();
+        darkColorScheme =
+            darkColorScheme.copyWith(surface: Colors.black).harmonized();
       }
+
+      if (settingsProvider.useSystemFont) NativeFeatures.loadSystemFont();
 
       return MaterialApp(
           title: 'Obtainium',
@@ -231,20 +242,21 @@ class _ObtainiumState extends State<Obtainium> {
           supportedLocales: context.supportedLocales,
           locale: context.locale,
           navigatorKey: globalNavigatorKey,
+          debugShowCheckedModeBanner: false,
           theme: ThemeData(
               useMaterial3: true,
               colorScheme: settingsProvider.theme == ThemeSettings.dark
                   ? darkColorScheme
                   : lightColorScheme,
               fontFamily:
-                  settingsProvider.useSystemFont ? 'SystemFont' : 'Metropolis'),
+                  settingsProvider.useSystemFont ? 'SystemFont' : 'Montserrat'),
           darkTheme: ThemeData(
               useMaterial3: true,
               colorScheme: settingsProvider.theme == ThemeSettings.light
                   ? lightColorScheme
                   : darkColorScheme,
               fontFamily:
-                  settingsProvider.useSystemFont ? 'SystemFont' : 'Metropolis'),
+                  settingsProvider.useSystemFont ? 'SystemFont' : 'Montserrat'),
           home: Shortcuts(shortcuts: <LogicalKeySet, Intent>{
             LogicalKeySet(LogicalKeyboardKey.select): const ActivateIntent(),
           }, child: const HomePage()));

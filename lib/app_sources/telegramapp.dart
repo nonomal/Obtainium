@@ -11,7 +11,7 @@ class TelegramApp extends AppSource {
   }
 
   @override
-  String sourceSpecificStandardizeURL(String url) {
+  String sourceSpecificStandardizeURL(String url, {bool forSelection = false}) {
     return 'https://${hosts[0]}';
   }
 
@@ -20,7 +20,8 @@ class TelegramApp extends AppSource {
     String standardUrl,
     Map<String, dynamic> additionalSettings,
   ) async {
-    Response res = await sourceRequest('https://t.me/s/TAndroidAPK');
+    Response res =
+        await sourceRequest('https://t.me/s/TAndroidAPK', additionalSettings);
     if (res.statusCode == 200) {
       var http = parse(res.body);
       var messages =
@@ -32,7 +33,9 @@ class TelegramApp extends AppSource {
         throw NoVersionError();
       }
       String? apkUrl = 'https://telegram.org/dl/android/apk';
-      return APKDetails(version, getApkUrlsFromUrls([apkUrl]),
+      return APKDetails(
+          version,
+          [MapEntry<String, String>('telegram-$version.apk', apkUrl)],
           AppNames('Telegram', 'Telegram'));
     } else {
       throw getObtainiumHttpError(res);

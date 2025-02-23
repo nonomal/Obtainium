@@ -5,6 +5,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:obtainium/components/generated_form_modal.dart';
 import 'package:obtainium/providers/source_provider.dart';
+import 'package:flutter_typeahead/flutter_typeahead.dart';
 
 abstract class GeneratedFormItem {
   late String key;
@@ -13,6 +14,7 @@ abstract class GeneratedFormItem {
   late dynamic defaultValue;
   List<dynamic> additionalValidators;
   dynamic ensureType(dynamic val);
+  GeneratedFormItem clone();
 
   GeneratedFormItem(this.key,
       {this.label = 'Input',
@@ -27,6 +29,7 @@ class GeneratedFormTextField extends GeneratedFormItem {
   late String? hint;
   late bool password;
   late TextInputType? textInputType;
+  late List<String>? autoCompleteOptions;
 
   GeneratedFormTextField(super.key,
       {super.label,
@@ -38,11 +41,26 @@ class GeneratedFormTextField extends GeneratedFormItem {
       this.max = 1,
       this.hint,
       this.password = false,
-      this.textInputType});
+      this.textInputType,
+      this.autoCompleteOptions});
 
   @override
   String ensureType(val) {
     return val.toString();
+  }
+
+  @override
+  GeneratedFormTextField clone() {
+    return GeneratedFormTextField(key,
+        label: label,
+        belowWidgets: belowWidgets,
+        defaultValue: defaultValue,
+        additionalValidators: List.from(additionalValidators),
+        required: required,
+        max: max,
+        hint: hint,
+        password: password,
+        textInputType: textInputType);
   }
 }
 
@@ -64,20 +82,47 @@ class GeneratedFormDropdown extends GeneratedFormItem {
   String ensureType(val) {
     return val.toString();
   }
+
+  @override
+  GeneratedFormDropdown clone() {
+    return GeneratedFormDropdown(
+      key,
+      opts?.map((e) => MapEntry(e.key, e.value)).toList(),
+      label: label,
+      belowWidgets: belowWidgets,
+      defaultValue: defaultValue,
+      disabledOptKeys:
+          disabledOptKeys != null ? List.from(disabledOptKeys!) : null,
+      additionalValidators: List.from(additionalValidators),
+    );
+  }
 }
 
 class GeneratedFormSwitch extends GeneratedFormItem {
+  bool disabled = false;
+
   GeneratedFormSwitch(
     super.key, {
     super.label,
     super.belowWidgets,
     bool super.defaultValue = false,
+    bool disabled = false,
     List<String? Function(bool value)> super.additionalValidators = const [],
   });
 
   @override
   bool ensureType(val) {
     return val == true || val == 'true';
+  }
+
+  @override
+  GeneratedFormSwitch clone() {
+    return GeneratedFormSwitch(key,
+        label: label,
+        belowWidgets: belowWidgets,
+        defaultValue: defaultValue,
+        disabled: false,
+        additionalValidators: List.from(additionalValidators));
   }
 }
 
@@ -103,6 +148,20 @@ class GeneratedFormTagInput extends GeneratedFormItem {
   Map<String, MapEntry<int, bool>> ensureType(val) {
     return val is Map<String, MapEntry<int, bool>> ? val : {};
   }
+
+  @override
+  GeneratedFormTagInput clone() {
+    return GeneratedFormTagInput(key,
+        label: label,
+        belowWidgets: belowWidgets,
+        defaultValue: defaultValue,
+        additionalValidators: List.from(additionalValidators),
+        deleteConfirmationMessage: deleteConfirmationMessage,
+        singleSelect: singleSelect,
+        alignment: alignment,
+        emptyMessage: emptyMessage,
+        showLabelWhenNotEmpty: showLabelWhenNotEmpty);
+  }
 }
 
 typedef OnValueChanges = void Function(
@@ -119,6 +178,19 @@ class GeneratedForm extends StatefulWidget {
   State<GeneratedForm> createState() => _GeneratedFormState();
 }
 
+List<List<GeneratedFormItem>> cloneFormItems(
+    List<List<GeneratedFormItem>> items) {
+  List<List<GeneratedFormItem>> clonedItems = [];
+  for (var row in items) {
+    List<GeneratedFormItem> clonedRow = [];
+    for (var it in row) {
+      clonedRow.add(it.clone());
+    }
+    clonedItems.add(clonedRow);
+  }
+  return clonedItems;
+}
+
 class GeneratedFormSubForm extends GeneratedFormItem {
   final List<List<GeneratedFormItem>> items;
 
@@ -128,6 +200,12 @@ class GeneratedFormSubForm extends GeneratedFormItem {
   @override
   ensureType(val) {
     return val; // Not easy to validate List<Map<String, dynamic>>
+  }
+
+  @override
+  GeneratedFormSubForm clone() {
+    return GeneratedFormSubForm(key, cloneFormItems(items),
+        label: label, belowWidgets: belowWidgets, defaultValue: defaultValue);
   }
 }
 
@@ -170,8 +248,8 @@ class _GeneratedFormState extends State<GeneratedForm> {
   void someValueChanged({bool isBuilding = false, bool forceInvalid = false}) {
     Map<String, dynamic> returnValues = values;
     var valid = true;
-    for (int r = 0; r < widget.items.length; r++) {
-      for (int i = 0; i < widget.items[r].length; i++) {
+    for (int r = 0; r < formInputs.length; r++) {
+      for (int i = 0; i < formInputs[r].length; i++) {
         if (formInputs[r][i] is TextFormField) {
           valid = valid && validateTextField(formInputs[r][i] as TextFormField);
         }
@@ -199,38 +277,62 @@ class _GeneratedFormState extends State<GeneratedForm> {
         var formItem = e.value;
         if (formItem is GeneratedFormTextField) {
           final formFieldKey = GlobalKey<FormFieldState>();
-          return TextFormField(
-            keyboardType: formItem.textInputType,
-            obscureText: formItem.password,
-            autocorrect: !formItem.password,
-            enableSuggestions: !formItem.password,
-            key: formFieldKey,
-            initialValue: values[formItem.key],
-            autovalidateMode: AutovalidateMode.onUserInteraction,
-            onChanged: (value) {
+          var ctrl = TextEditingController(text: values[formItem.key]);
+          return TypeAheadField<String>(
+            controller: ctrl,
+            builder: (context, controller, focusNode) {
+              return TextFormField(
+                controller: ctrl,
+                focusNode: focusNode,
+                keyboardType: formItem.textInputType,
+                obscureText: formItem.password,
+                autocorrect: !formItem.password,
+                enableSuggestions: !formItem.password,
+                key: formFieldKey,
+                autovalidateMode: AutovalidateMode.onUserInteraction,
+                onChanged: (value) {
+                  setState(() {
+                    values[formItem.key] = value;
+                    someValueChanged();
+                  });
+                },
+                decoration: InputDecoration(
+                    helperText:
+                        formItem.label + (formItem.required ? ' *' : ''),
+                    hintText: formItem.hint),
+                minLines: formItem.max <= 1 ? null : formItem.max,
+                maxLines: formItem.max <= 1 ? 1 : formItem.max,
+                validator: (value) {
+                  if (formItem.required &&
+                      (value == null || value.trim().isEmpty)) {
+                    return '${formItem.label} ${tr('requiredInBrackets')}';
+                  }
+                  for (var validator in formItem.additionalValidators) {
+                    String? result = validator(value);
+                    if (result != null) {
+                      return result;
+                    }
+                  }
+                  return null;
+                },
+              );
+            },
+            itemBuilder: (context, value) {
+              return ListTile(title: Text(value));
+            },
+            onSelected: (value) {
+              ctrl.text = value;
               setState(() {
                 values[formItem.key] = value;
                 someValueChanged();
               });
             },
-            decoration: InputDecoration(
-                helperText: formItem.label + (formItem.required ? ' *' : ''),
-                hintText: formItem.hint),
-            minLines: formItem.max <= 1 ? null : formItem.max,
-            maxLines: formItem.max <= 1 ? 1 : formItem.max,
-            validator: (value) {
-              if (formItem.required &&
-                  (value == null || value.trim().isEmpty)) {
-                return '${formItem.label} ${tr('requiredInBrackets')}';
-              }
-              for (var validator in formItem.additionalValidators) {
-                String? result = validator(value);
-                if (result != null) {
-                  return result;
-                }
-              }
-              return null;
+            suggestionsCallback: (search) {
+              return formItem.autoCompleteOptions
+                  ?.where((t) => t.toLowerCase().contains(search.toLowerCase()))
+                  .toList();
             },
+            hideOnEmpty: true,
           );
         } else if (formItem is GeneratedFormDropdown) {
           if (formItem.opts!.isEmpty) {
@@ -297,15 +399,51 @@ class _GeneratedFormState extends State<GeneratedForm> {
               ),
               Switch(
                   value: values[fieldKey],
-                  onChanged: (value) {
-                    setState(() {
-                      values[fieldKey] = value;
-                      someValueChanged();
-                    });
-                  })
+                  onChanged:
+                      (widget.items[r][e] as GeneratedFormSwitch).disabled
+                          ? null
+                          : (value) {
+                              setState(() {
+                                values[fieldKey] = value;
+                                someValueChanged();
+                              });
+                            })
             ],
           );
         } else if (widget.items[r][e] is GeneratedFormTagInput) {
+          onAddPressed() {
+            showDialog<Map<String, dynamic>?>(
+                context: context,
+                builder: (BuildContext ctx) {
+                  return GeneratedFormModal(
+                      title: widget.items[r][e].label,
+                      items: [
+                        [GeneratedFormTextField('label', label: tr('label'))]
+                      ]);
+                }).then((value) {
+              String? label = value?['label'];
+              if (label != null) {
+                setState(() {
+                  var temp =
+                      values[fieldKey] as Map<String, MapEntry<int, bool>>?;
+                  temp ??= {};
+                  if (temp[label] == null) {
+                    var singleSelect =
+                        (widget.items[r][e] as GeneratedFormTagInput)
+                            .singleSelect;
+                    var someSelected = temp.entries
+                        .where((element) => element.value.value)
+                        .isNotEmpty;
+                    temp[label] = MapEntry(generateRandomLightColor().value,
+                        !(someSelected && singleSelect));
+                    values[fieldKey] = temp;
+                    someValueChanged();
+                  }
+                });
+              }
+            });
+          }
+
           formInputs[r][e] =
               Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             if ((values[fieldKey] as Map<String, MapEntry<int, bool>>?)
@@ -331,14 +469,14 @@ class _GeneratedFormState extends State<GeneratedForm> {
                   (widget.items[r][e] as GeneratedFormTagInput).alignment,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                (values[fieldKey] as Map<String, MapEntry<int, bool>>?)
-                            ?.isEmpty ==
-                        true
-                    ? Text(
-                        (widget.items[r][e] as GeneratedFormTagInput)
-                            .emptyMessage,
-                      )
-                    : const SizedBox.shrink(),
+                // (values[fieldKey] as Map<String, MapEntry<int, bool>>?)
+                //             ?.isEmpty ==
+                //         true
+                //     ? Text(
+                //         (widget.items[r][e] as GeneratedFormTagInput)
+                //             .emptyMessage,
+                //       )
+                //     : const SizedBox.shrink(),
                 ...(values[fieldKey] as Map<String, MapEntry<int, bool>>?)
                         ?.entries
                         .map((e2) {
@@ -462,62 +600,37 @@ class _GeneratedFormState extends State<GeneratedForm> {
                           tooltip: tr('remove'),
                         ))
                     : const SizedBox.shrink(),
-                Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: IconButton(
-                      onPressed: () {
-                        showDialog<Map<String, dynamic>?>(
-                            context: context,
-                            builder: (BuildContext ctx) {
-                              return GeneratedFormModal(
-                                  title: widget.items[r][e].label,
-                                  items: [
-                                    [
-                                      GeneratedFormTextField('label',
-                                          label: tr('label'))
-                                    ]
-                                  ]);
-                            }).then((value) {
-                          String? label = value?['label'];
-                          if (label != null) {
-                            setState(() {
-                              var temp = values[fieldKey]
-                                  as Map<String, MapEntry<int, bool>>?;
-                              temp ??= {};
-                              if (temp[label] == null) {
-                                var singleSelect = (widget.items[r][e]
-                                        as GeneratedFormTagInput)
-                                    .singleSelect;
-                                var someSelected = temp.entries
-                                    .where((element) => element.value.value)
-                                    .isNotEmpty;
-                                temp[label] = MapEntry(
-                                    generateRandomLightColor().value,
-                                    !(someSelected && singleSelect));
-                                values[fieldKey] = temp;
-                                someValueChanged();
-                              }
-                            });
-                          }
-                        });
-                      },
-                      icon: const Icon(Icons.add),
-                      visualDensity: VisualDensity.compact,
-                      tooltip: tr('add'),
-                    )),
+                (values[fieldKey] as Map<String, MapEntry<int, bool>>?)
+                            ?.isEmpty ==
+                        true
+                    ? Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: TextButton.icon(
+                          onPressed: onAddPressed,
+                          icon: const Icon(Icons.add),
+                          label: Text(
+                              (widget.items[r][e] as GeneratedFormTagInput)
+                                  .label),
+                        ))
+                    : Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: IconButton(
+                          onPressed: onAddPressed,
+                          icon: const Icon(Icons.add),
+                          visualDensity: VisualDensity.compact,
+                          tooltip: tr('add'),
+                        )),
               ],
             )
           ]);
         } else if (widget.items[r][e] is GeneratedFormSubForm) {
           List<Widget> subformColumn = [];
+          var compact = (widget.items[r][e] as GeneratedFormSubForm)
+                      .items
+                      .length ==
+                  1 &&
+              (widget.items[r][e] as GeneratedFormSubForm).items[0].length == 1;
           for (int i = 0; i < values[fieldKey].length; i++) {
-            var items = (widget.items[r][e] as GeneratedFormSubForm)
-                .items
-                .map((x) => x.map((y) {
-                      y.defaultValue = values[fieldKey]?[i]?[y.key];
-                      return y;
-                    }).toList())
-                .toList();
             var internalFormKey = ValueKey(generateRandomNumber(
                 values[fieldKey].length,
                 seed2: i,
@@ -525,18 +638,28 @@ class _GeneratedFormState extends State<GeneratedForm> {
             subformColumn.add(Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Divider(),
-                const SizedBox(
-                  height: 16,
-                ),
-                Text(
-                  '${(widget.items[r][e] as GeneratedFormSubForm).label} (${i + 1})',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
+                if (!compact)
+                  const SizedBox(
+                    height: 16,
+                  ),
+                if (!compact)
+                  Text(
+                    '${(widget.items[r][e] as GeneratedFormSubForm).label} (${i + 1})',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
                 GeneratedForm(
                   key: internalFormKey,
-                  items: items,
+                  items: cloneFormItems(
+                          (widget.items[r][e] as GeneratedFormSubForm).items)
+                      .map((x) => x.map((y) {
+                            y.defaultValue = values[fieldKey]?[i]?[y.key];
+                            y.key = '${y.key.toString()},$internalFormKey';
+                            return y;
+                          }).toList())
+                      .toList(),
                   onValueChanges: (values, valid, isBuilding) {
+                    values = values.map(
+                        (key, value) => MapEntry(key.split(',')[0], value));
                     if (valid) {
                       this.values[fieldKey]?[i] = values;
                     }
@@ -567,13 +690,12 @@ class _GeneratedFormState extends State<GeneratedForm> {
                           Icons.delete_outline_rounded,
                         ))
                   ],
-                ),
+                )
               ],
             ));
           }
           subformColumn.add(Padding(
-            padding: EdgeInsets.only(
-                bottom: values[fieldKey].length > 0 ? 24 : 0, top: 8),
+            padding: const EdgeInsets.only(bottom: 0, top: 8),
             child: Row(
               children: [
                 Expanded(
@@ -591,9 +713,6 @@ class _GeneratedFormState extends State<GeneratedForm> {
               ],
             ),
           ));
-          if (values[fieldKey].length > 0) {
-            subformColumn.add(const Divider());
-          }
           formInputs[r][e] = Column(children: subformColumn);
         }
       }

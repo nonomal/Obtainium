@@ -1,10 +1,11 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:obtainium/components/generated_form.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:obtainium/components/generated_form_modal.dart';
 import 'package:obtainium/custom_errors.dart';
 import 'package:obtainium/main.dart';
+import 'package:obtainium/pages/apps.dart';
 import 'package:obtainium/pages/settings.dart';
 import 'package:obtainium/providers/apps_provider.dart';
 import 'package:obtainium/providers/settings_provider.dart';
@@ -12,6 +13,7 @@ import 'package:obtainium/providers/source_provider.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:provider/provider.dart';
+import 'package:markdown/markdown.dart' as md;
 
 class AppPage extends StatefulWidget {
   const AppPage({super.key, required this.appId});
@@ -24,16 +26,35 @@ class AppPage extends StatefulWidget {
 
 class _AppPageState extends State<AppPage> {
   AppInMemory? prevApp;
+  bool updating = false;
 
   @override
   Widget build(BuildContext context) {
     var appsProvider = context.watch<AppsProvider>();
     var settingsProvider = context.watch<SettingsProvider>();
-    getUpdate(String id) {
-      appsProvider.checkUpdate(id).catchError((e) {
-        showError(e, context);
-        return null;
-      });
+    getUpdate(String id, {bool resetVersion = false}) async {
+      try {
+        setState(() {
+          updating = true;
+        });
+        await appsProvider.checkUpdate(id);
+        if (resetVersion) {
+          appsProvider.apps[id]?.app.additionalSettings['versionDetection'] =
+              true;
+          if (appsProvider.apps[id]?.app.installedVersion != null) {
+            appsProvider.apps[id]?.app.installedVersion =
+                appsProvider.apps[id]?.app.latestVersion;
+          }
+          appsProvider.saveApps([appsProvider.apps[id]!.app]);
+        }
+      } catch (err) {
+        // ignore: use_build_context_synchronously
+        showError(err, context);
+      } finally {
+        setState(() {
+          updating = false;
+        });
+      }
     }
 
     bool areDownloadsRunning = appsProvider.areDownloadsRunning();
@@ -54,18 +75,239 @@ class _AppPageState extends State<AppPage> {
     var trackOnly = app?.app.additionalSettings['trackOnly'] == true;
 
     bool isVersionDetectionStandard =
-        app?.app.additionalSettings['versionDetection'] ==
-            'standardVersionDetection';
+        app?.app.additionalSettings['versionDetection'] == true;
 
     bool installedVersionIsEstimate = trackOnly ||
         (app?.app.installedVersion != null &&
-            app?.app.additionalSettings['versionDetection'] ==
-                'noVersionDetection');
+            app?.app.additionalSettings['versionDetection'] != true);
 
-    getInfoColumn() => Column(
+    getInfoColumn() {
+      String versionLines = '';
+      bool installed = app?.app.installedVersion != null;
+      bool upToDate = app?.app.installedVersion == app?.app.latestVersion;
+      if (installed) {
+        versionLines = '${app?.app.installedVersion} ${tr('installed')}';
+        if (upToDate) {
+          versionLines += '/${tr('latest')}';
+        }
+      } else {
+        versionLines = tr('notInstalled');
+      }
+      if (!upToDate) {
+        versionLines += '\n${app?.app.latestVersion} ${tr('latest')}';
+      }
+      String infoLines = tr('lastUpdateCheckX', args: [
+        app?.app.lastUpdateCheck == null
+            ? tr('never')
+            : '${app?.app.lastUpdateCheck?.toLocal()}'
+      ]);
+      if (trackOnly) {
+        infoLines = '${tr('xIsTrackOnly', args: [tr('app')])}\n$infoLines';
+      }
+      if (installedVersionIsEstimate) {
+        infoLines = '${tr('pseudoVersionInUse')}\n$infoLines';
+      }
+      if ((app?.app.apkUrls.length ?? 0) > 0) {
+        infoLines =
+            '$infoLines\n${app?.app.apkUrls.length == 1 ? app?.app.apkUrls[0].key : plural('apk', app?.app.apkUrls.length ?? 0)}';
+      }
+      var changeLogFn = app != null ? getChangeLogFn(context, app.app) : null;
+      return Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 24),
+            child: Column(
+              children: [
+                const SizedBox(
+                  height: 8,
+                ),
+                Text(versionLines,
+                    textAlign: TextAlign.start,
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodyLarge!
+                        .copyWith(fontWeight: FontWeight.bold)),
+                changeLogFn != null || app?.app.releaseDate != null
+                    ? GestureDetector(
+                        onTap: changeLogFn,
+                        child: Text(
+                          app?.app.releaseDate == null
+                              ? tr('changes')
+                              : app!.app.releaseDate!.toLocal().toString(),
+                          textAlign: TextAlign.center,
+                          style:
+                              Theme.of(context).textTheme.labelSmall!.copyWith(
+                                    decoration: changeLogFn != null
+                                        ? TextDecoration.underline
+                                        : null,
+                                    fontStyle: changeLogFn != null
+                                        ? FontStyle.italic
+                                        : null,
+                                  ),
+                        ),
+                      )
+                    : const SizedBox.shrink(),
+                const SizedBox(
+                  height: 8,
+                ),
+              ],
+            ),
+          ),
+          Text(
+            infoLines,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontStyle: FontStyle.italic, fontSize: 12),
+          ),
+          if (app?.app.apkUrls.isNotEmpty == true ||
+              app?.app.otherAssetUrls.isNotEmpty == true)
+            GestureDetector(
+                onTap: app?.app == null || updating
+                    ? null
+                    : () async {
+                        try {
+                          await appsProvider
+                              .downloadAppAssets([app!.app.id], context);
+                        } catch (e) {
+                          showError(e, context);
+                        }
+                      },
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                        decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            color: settingsProvider.highlightTouchTargets
+                                ? (Theme.of(context).brightness ==
+                                            Brightness.light
+                                        ? Theme.of(context).primaryColor
+                                        : Theme.of(context).primaryColorLight)
+                                    .withAlpha(Theme.of(context).brightness ==
+                                            Brightness.light
+                                        ? 20
+                                        : 40)
+                                : null),
+                        padding: settingsProvider.highlightTouchTargets
+                            ? const EdgeInsetsDirectional.fromSTEB(12, 6, 12, 6)
+                            : const EdgeInsetsDirectional.fromSTEB(0, 6, 0, 6),
+                        margin:
+                            const EdgeInsetsDirectional.fromSTEB(0, 6, 0, 0),
+                        child: Text(
+                          tr('downloadX',
+                              args: [tr('releaseAsset').toLowerCase()]),
+                          textAlign: TextAlign.center,
+                          style:
+                              Theme.of(context).textTheme.labelSmall!.copyWith(
+                                    decoration: TextDecoration.underline,
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                        ))
+                  ],
+                )),
+          const SizedBox(
+            height: 48,
+          ),
+          CategoryEditorSelector(
+              alignment: WrapAlignment.center,
+              preselected: app?.app.categories != null
+                  ? app!.app.categories.toSet()
+                  : {},
+              onSelected: (categories) {
+                if (app != null) {
+                  app.app.categories = categories;
+                  appsProvider.saveApps([app.app]);
+                }
+              }),
+          if (app?.app.additionalSettings['about'] is String &&
+              app?.app.additionalSettings['about'].isNotEmpty)
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(
+                  height: 48,
+                ),
+                GestureDetector(
+                    onLongPress: () {
+                      Clipboard.setData(ClipboardData(
+                          text: app?.app.additionalSettings['about'] ?? ''));
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text(tr('copiedToClipboard')),
+                      ));
+                    },
+                    child: Markdown(
+                      physics: NeverScrollableScrollPhysics(),
+                      shrinkWrap: true,
+                      styleSheet: MarkdownStyleSheet(
+                          blockquoteDecoration:
+                              BoxDecoration(color: Theme.of(context).cardColor),
+                          textAlign: WrapAlignment.center),
+                      data: app?.app.additionalSettings['about'],
+                      onTapLink: (text, href, title) {
+                        if (href != null) {
+                          launchUrlString(href,
+                              mode: LaunchMode.externalApplication);
+                        }
+                      },
+                      extensionSet: md.ExtensionSet(
+                        md.ExtensionSet.gitHubFlavored.blockSyntaxes,
+                        [
+                          md.EmojiSyntax(),
+                          ...md.ExtensionSet.gitHubFlavored.inlineSyntaxes
+                        ],
+                      ),
+                    ))
+              ],
+            ),
+        ],
+      );
+    }
+
+    getFullInfoColumn({bool small = false}) => Column(
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            SizedBox(height: small ? 5 : 20),
+            FutureBuilder(
+                future:
+                    appsProvider.updateAppIcon(app?.app.id, ignoreCache: true),
+                builder: (ctx, val) {
+                  return app?.icon != null
+                      ? Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                              GestureDetector(
+                                onTap: app == null
+                                    ? null
+                                    : () => pm.openApp(app.app.id),
+                                child: Image.memory(
+                                  app!.icon!,
+                                  height: small ? 70 : 150,
+                                  gaplessPlayback: true,
+                                ),
+                              )
+                            ])
+                      : Container();
+                }),
+            SizedBox(
+              height: small ? 10 : 25,
+            ),
+            Text(
+              app?.name ?? tr('app'),
+              textAlign: TextAlign.center,
+              style: small
+                  ? Theme.of(context).textTheme.displaySmall
+                  : Theme.of(context).textTheme.displayLarge,
+            ),
+            Text(tr('byX', args: [app?.author ?? tr('unknown')]),
+                textAlign: TextAlign.center,
+                style: small
+                    ? Theme.of(context).textTheme.headlineSmall
+                    : Theme.of(context).textTheme.headlineMedium),
+            const SizedBox(
+              height: 24,
+            ),
             GestureDetector(
                 onTap: () {
                   if (app?.app.url != null) {
@@ -82,142 +324,14 @@ class _AppPageState extends State<AppPage> {
                 child: Text(
                   app?.app.url ?? '',
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
+                  style: Theme.of(context).textTheme.labelSmall!.copyWith(
                       decoration: TextDecoration.underline,
-                      fontStyle: FontStyle.italic,
-                      fontSize: 12),
+                      fontStyle: FontStyle.italic),
                 )),
-            const SizedBox(
-              height: 32,
-            ),
-            Column(
-              children: [
-                Text(
-                  '${tr('latestVersionX', args: [
-                        app?.app.latestVersion ?? tr('unknown')
-                      ])}\n${tr('installedVersionX', args: [
-                        app?.app.installedVersion ?? tr('none')
-                      ])}${installedVersionIsEstimate ? '\n${tr('estimateInBrackets')}' : ''}',
-                  textAlign: TextAlign.end,
-                  style: Theme.of(context).textTheme.bodyLarge!,
-                ),
-              ],
-            ),
-            if (app?.app.installedVersion != null &&
-                !isVersionDetectionStandard)
-              Column(
-                children: [
-                  const SizedBox(
-                    height: 16,
-                  ),
-                  Text(
-                    '${trackOnly ? '${tr('xIsTrackOnly', args: [
-                            tr('app')
-                          ])}\n' : ''}${tr('noVersionDetection')}',
-                    style: Theme.of(context).textTheme.labelSmall,
-                    textAlign: TextAlign.center,
-                  )
-                ],
-              ),
-            const SizedBox(
-              height: 32,
-            ),
-            Text(
-              tr('lastUpdateCheckX', args: [
-                app?.app.lastUpdateCheck == null
-                    ? tr('never')
-                    : '\n${app?.app.lastUpdateCheck?.toLocal()}'
-              ]),
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontStyle: FontStyle.italic, fontSize: 12),
-            ),
-            const SizedBox(
-              height: 48,
-            ),
-            CategoryEditorSelector(
-                alignment: WrapAlignment.center,
-                preselected: app?.app.categories != null
-                    ? app!.app.categories.toSet()
-                    : {},
-                onSelected: (categories) {
-                  if (app != null) {
-                    app.app.categories = categories;
-                    appsProvider.saveApps([app.app]);
-                  }
-                }),
-            if (app?.app.additionalSettings['about'] is String &&
-                app?.app.additionalSettings['about'].isNotEmpty)
-              Column(
-                children: [
-                  const SizedBox(
-                    height: 48,
-                  ),
-                  GestureDetector(
-                    onLongPress: () {
-                      Clipboard.setData(ClipboardData(
-                          text: app?.app.additionalSettings['about'] ?? ''));
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                        content: Text(tr('copiedToClipboard')),
-                      ));
-                    },
-                    child: Text(
-                      app?.app.additionalSettings['about'],
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(fontStyle: FontStyle.italic),
-                    ),
-                  )
-                ],
-              ),
-          ],
-        );
-
-    getFullInfoColumn() => Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const SizedBox(height: 20),
-            app?.icon != null
-                ? Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                    GestureDetector(
-                      child: Image.memory(
-                        app!.icon!,
-                        height: 150,
-                        gaplessPlayback: true,
-                      ),
-                      onTap: () => pm.openApp(app.app.id),
-                    )
-                  ])
-                : Container(),
-            const SizedBox(
-              height: 25,
-            ),
-            Text(
-              app?.name ?? tr('app'),
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.displayLarge,
-            ),
-            Text(
-              tr('byX', args: [app?.app.author ?? tr('unknown')]),
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
-            const SizedBox(
-              height: 8,
-            ),
             Text(
               app?.app.id ?? '',
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.labelSmall,
-            ),
-            app?.app.releaseDate == null
-                ? const SizedBox.shrink()
-                : Text(
-                    app!.app.releaseDate.toString(),
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.labelSmall,
-                  ),
-            const SizedBox(
-              height: 32,
             ),
             getInfoColumn(),
             const SizedBox(height: 150)
@@ -228,7 +342,7 @@ class _AppPageState extends State<AppPage> {
         ? WebViewWidget(
             controller: WebViewController()
               ..setJavaScriptMode(JavaScriptMode.unrestricted)
-              ..setBackgroundColor(Theme.of(context).colorScheme.background)
+              ..setBackgroundColor(Theme.of(context).colorScheme.surface)
               ..setJavaScriptMode(JavaScriptMode.unrestricted)
               ..setNavigationDelegate(
                 NavigationDelegate(
@@ -287,25 +401,6 @@ class _AppPageState extends State<AppPage> {
               return row;
             }).toList();
 
-            items = items.map((row) {
-              row = row.map((e) {
-                if (e.key == 'versionDetection' && e is GeneratedFormDropdown) {
-                  e.disabledOptKeys ??= [];
-                  if (app?.app.installedVersion != null &&
-                      app?.app.additionalSettings['versionDetection'] !=
-                          'releaseDateAsVersion' &&
-                      !appsProvider.isVersionDetectionPossible(app)) {
-                    e.disabledOptKeys!.add('standardVersionDetection');
-                  }
-                  if (app?.app.releaseDate == null) {
-                    e.disabledOptKeys!.add('releaseDateAsVersion');
-                  }
-                }
-                return e;
-              }).toList();
-              return row;
-            }).toList();
-
             return GeneratedFormModal(
                 title: tr('additionalOptions'), items: items);
           });
@@ -320,56 +415,56 @@ class _AppPageState extends State<AppPage> {
           // ignore: use_build_context_synchronously
           showMessage(tr('appsFromSourceAreTrackOnly'), context);
         }
-        if (app.app.additionalSettings['versionDetection'] ==
-            'releaseDateAsVersion') {
-          if (originalSettings['versionDetection'] != 'releaseDateAsVersion') {
-            if (app.app.releaseDate != null) {
-              bool isUpdated =
-                  app.app.installedVersion == app.app.latestVersion;
-              app.app.latestVersion =
-                  app.app.releaseDate!.microsecondsSinceEpoch.toString();
-              if (isUpdated) {
-                app.app.installedVersion = app.app.latestVersion;
-              }
+        var versionDetectionEnabled =
+            app.app.additionalSettings['versionDetection'] == true &&
+                originalSettings['versionDetection'] != true;
+        var releaseDateVersionEnabled =
+            app.app.additionalSettings['releaseDateAsVersion'] == true &&
+                originalSettings['releaseDateAsVersion'] != true;
+        var releaseDateVersionDisabled =
+            app.app.additionalSettings['releaseDateAsVersion'] != true &&
+                originalSettings['releaseDateAsVersion'] == true;
+        if (releaseDateVersionEnabled) {
+          if (app.app.releaseDate != null) {
+            bool isUpdated = app.app.installedVersion == app.app.latestVersion;
+            app.app.latestVersion =
+                app.app.releaseDate!.microsecondsSinceEpoch.toString();
+            if (isUpdated) {
+              app.app.installedVersion = app.app.latestVersion;
             }
           }
-        } else if (originalSettings['versionDetection'] ==
-            'releaseDateAsVersion') {
+        } else if (releaseDateVersionDisabled) {
           app.app.installedVersion =
               app.installedInfo?.versionName ?? app.app.installedVersion;
         }
+        if (versionDetectionEnabled) {
+          app.app.additionalSettings['versionDetection'] = true;
+          app.app.additionalSettings['releaseDateAsVersion'] = false;
+        }
         appsProvider.saveApps([app.app]).then((value) {
-          getUpdate(app.app.id);
+          getUpdate(app.app.id, resetVersion: versionDetectionEnabled);
         });
       }
     }
 
-    getResetInstallStatusButton() => TextButton(
-        onPressed: app?.app == null
-            ? null
-            : () {
-                app!.app.installedVersion = null;
-                appsProvider.saveApps([app.app]);
-              },
-        child: Text(
-          tr('resetInstallStatus'),
-          textAlign: TextAlign.center,
-        ));
-
     getInstallOrUpdateButton() => TextButton(
-        onPressed: (app?.app.installedVersion == null ||
+        onPressed: !updating &&
+                (app?.app.installedVersion == null ||
                     app?.app.installedVersion != app?.app.latestVersion) &&
                 !areDownloadsRunning
             ? () async {
                 try {
+                  var successMessage = app?.app.installedVersion == null
+                      ? tr('installed')
+                      : tr('appsUpdated');
                   HapticFeedback.heavyImpact();
                   var res = await appsProvider.downloadAndInstallLatestApps(
                     app?.app.id != null ? [app!.app.id] : [],
                     globalNavigatorKey.currentContext,
                   );
-                  if (app?.app.installedVersion != null && !trackOnly) {
+                  if (res.isNotEmpty && !trackOnly) {
                     // ignore: use_build_context_synchronously
-                    showMessage(tr('appsUpdated'), context);
+                    showMessage(successMessage, context);
                   }
                   if (res.isNotEmpty && mounted) {
                     Navigator.of(context).pop();
@@ -399,20 +494,10 @@ class _AppPageState extends State<AppPage> {
                 child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
-                      if (app?.app.installedVersion != null &&
-                          app?.app.installedVersion != app?.app.latestVersion &&
-                          !isVersionDetectionStandard &&
-                          !trackOnly)
-                        IconButton(
-                            onPressed: app?.downloadProgress != null
-                                ? null
-                                : showMarkUpdatedDialog,
-                            tooltip: tr('markUpdated'),
-                            icon: const Icon(Icons.done)),
                       if (source != null &&
                           source.combinedAppSpecificSettingFormItems.isNotEmpty)
                         IconButton(
-                            onPressed: app?.downloadProgress != null
+                            onPressed: app?.downloadProgress != null || updating
                                 ? null
                                 : () async {
                                     var values =
@@ -437,11 +522,8 @@ class _AppPageState extends State<AppPage> {
                                   builder: (BuildContext ctx) {
                                     return AlertDialog(
                                       scrollable: true,
-                                      content: getInfoColumn(),
-                                      title: Text(
-                                          '${app.name} ${tr('byX', args: [
-                                            app.app.author
-                                          ])}'),
+                                      content: getFullInfoColumn(small: true),
+                                      title: Text(app.name),
                                       actions: [
                                         TextButton(
                                             onPressed: () {
@@ -454,17 +536,33 @@ class _AppPageState extends State<AppPage> {
                             },
                             icon: const Icon(Icons.more_horiz),
                             tooltip: tr('more')),
+                      if (app?.app.installedVersion != null &&
+                          app?.app.installedVersion != app?.app.latestVersion &&
+                          !isVersionDetectionStandard &&
+                          !trackOnly)
+                        IconButton(
+                            onPressed: app?.downloadProgress != null || updating
+                                ? null
+                                : showMarkUpdatedDialog,
+                            tooltip: tr('markUpdated'),
+                            icon: const Icon(Icons.done)),
+                      if ((!isVersionDetectionStandard || trackOnly) &&
+                          app?.app.installedVersion != null &&
+                          app?.app.installedVersion == app?.app.latestVersion)
+                        IconButton(
+                            onPressed: app?.app == null || updating
+                                ? null
+                                : () {
+                                    app!.app.installedVersion = null;
+                                    appsProvider.saveApps([app.app]);
+                                  },
+                            icon: const Icon(Icons.restore_rounded),
+                            tooltip: tr('resetInstallStatus')),
                       const SizedBox(width: 16.0),
-                      Expanded(
-                          child: (!isVersionDetectionStandard || trackOnly) &&
-                                  app?.app.installedVersion != null &&
-                                  app?.app.installedVersion ==
-                                      app?.app.latestVersion
-                              ? getResetInstallStatusButton()
-                              : getInstallOrUpdateButton()),
+                      Expanded(child: getInstallOrUpdateButton()),
                       const SizedBox(width: 16.0),
                       IconButton(
-                        onPressed: app?.downloadProgress != null
+                        onPressed: app?.downloadProgress != null || updating
                             ? null
                             : () {
                                 appsProvider
